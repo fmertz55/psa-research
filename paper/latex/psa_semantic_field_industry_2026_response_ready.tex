@@ -1,0 +1,147 @@
+\documentclass[11pt]{article}
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{url}
+
+\title{PSA: Anchor-Triangulated Semantic Blocking for Knowledge-Graph Ingestion}
+
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Knowledge-graph ingestion systems must decide whether incoming sentences express new information or restate known claims. Exhaustive paraphrase comparison is quadratic, while approximate nearest-neighbor search alone does not expose stable regions operators can monitor across releases. We present Pixelization of Semantic Anisotropy (PSA), a semantic blocking layer built from anchor-triangulated signatures. In a 3,424-sentence graph, 115-dimensional signatures correlate with full-embedding distance structure (Pearson $r=0.58$, Spearman $\rho=0.62$), though random projections preserve more raw structure (median $r=0.76$). PSA's value is frame reproducibility: disjoint semantic anchor frames show excess agreement $+0.51$--$+0.55$, versus none for independent random projections and $+0.31$--$+0.37$ for random sentence-anchor frames. Quantile-calibrated radius-6 routing retains 98.0\% of globally enumerated pairs at cosine $\geq0.88$ while pruning 83.5\% of comparisons. This is blocking recall, not paraphrase F1. PSA is a candidate surface whose complete sentence-and-group union still requires task-calibrated verification.
+\end{abstract}
+
+\section{Introduction}
+
+Enterprise ingestion pipelines process reports, documentation, tickets, policies, and web sources into graphs of sentences, entities, discourse links, and paraphrase structures. A recurring operational question is whether an incoming sentence is a new idea or a restatement of an existing one. Exact matching is brittle; global semantic comparison is expensive. With $n$ stored sentences, comparing every insertion to every prior sentence requires $O(n)$ work per insertion and $O(n^2)$ work over corpus growth.
+
+PSA addresses this as \emph{blocking} in the record-linkage sense \citep{fellegi1969record,christen2012data}: assign a deterministic semantic address, retrieve a bounded candidate set near that address, and run the expensive full-dimensional or cross-encoder decision only on those candidates. The contribution is not a new paraphrase classifier. It is an operational coordinate layer with measurable fidelity, recall/cost, occupancy, scramble, order-stability, and frame-migration diagnostics.
+
+\section{Related Work}
+
+PSA sits between approximate nearest-neighbor retrieval and reference-based representation. LSH, FAISS, and HNSW provide scalable vector search \citep{indyk1998approximate,johnson2019billion,malkov2020hnsw}; PSA is structurally similar to inverted-file indexing with a tunable probe radius, but its blocks are stable, versioned semantic addresses rather than opaque ANN partitions. The Johnson--Lindenstrauss lemma \citep{johnson1984extensions} is the right compression baseline: random projections preserve more raw pairwise structure than PSA signatures. PSA's differentiator is instead reproducible frame structure and address auditability. Anchor-relative representations show that expressing points by relations to anchors can support cross-system comparison \citep{moschella2023relative}; PSA contributes an operational within-model test by showing that disjoint semantic anchor catalogs recover correlated sentence-distance structures beyond random-direction and random-sentence nulls. We treat sentence-distribution anisotropy \citep{ethayarajh2019contextual} as a measured confound rather than an assumption.
+
+\section{System and Method}
+\label{sec:method}
+
+The target system ingests documents into a graph of sentence nodes, entity nodes, \textsc{ParaphraseGroup} nodes, and discourse edges. Every ingested sentence remains a durable sentence node. A verifier may additionally place two or more verified-equivalent sentences in a group; an unmatched sentence remains free-range rather than becoming a singleton group. Before graph mutation, the candidate union includes nearby free-range sentences, established groups, high-membership local groups, and unresolved items from the current batch. PSA bounds that union; native vectors or a stronger verifier decide equivalence.
+
+A guide star is a full sentence used as a semantic reference point. The original frame contains 75 guide stars in seven tiers; the expanded frame adds 40 stars covering perception, motion, social and institutional events, commerce, resource transfer, and physical-world grounding. For sentence $t$ with embedding $\mathbf{e}(t)$ and guide stars $g_i$, PSA computes
+\begin{equation}
+\sigma(t)=\left[w_{\tau(i)}\cos(\mathbf{e}(t),\mathbf{e}(g_i))\right]_{i=0}^{G-1},
+\end{equation}
+where $w_{\tau(i)}$ is the tier weight for star $i$. Guide-star positions are computed once from pairwise cosine distances with deterministic multidimensional scaling \citep{kruskal1964mds}. Sentence coordinates are positive-weight barycenters over those fixed star positions, giving the reduction $\mathbb{R}^{4096}\rightarrow\mathbb{R}^G\rightarrow\mathbb{R}^3$.
+
+The raw barycentric 3D grid is not automatically useful. In the current graph, raw coarse coordinates place all 3,424 sentences into only eight coarse cells; a radius-1 shell covers every pair and gives 100\% recall with zero pruning. Affine min--max calibration remains too concentrated, opening 1,143 occupied cells in the 115-star frame. We therefore rank-normalize each coordinate axis to $[0,1]$ and divide each axis into 20 coarse bins, opening 2,739 occupied cells. Radius over this calibrated grid becomes the operating knob for recall/cost.
+
+\section{Evaluation}
+\label{sec:evaluation}
+
+The original ingestion evaluation contains 3,378 segmented sentences from eight AI-related source documents plus an ontology seed. The de-censoring and fidelity analyses use the current live graph with 3,424 embedded sentences and 5,860,176 full-dimensional sentence pairs. Embeddings are Qwen3-Embedding-8B vectors with 4,096 dimensions \citep{zhang2025qwen3embedding}. We evaluate (i) fidelity to full-embedding structure, (ii) blocking recall paired with pruning, and (iii) operational falsification controls.
+
+The random-projection and random-sentence controls are separate completed 1,000-trial runs. Their exact immutable filenames and selectors are recorded in the accompanying claim-provenance ledger. The later ``latest'' alias skips random projection and is not used as provenance for that claim.
+
+\subsection{Signature Fidelity and Frame Robustness}
+
+The signature layer preserves more full-embedding structure than the 3D index. In the 115-star frame, signature distance structure correlates with full-embedding distance at Pearson $r=0.577$ and Spearman $\rho=0.617$; the 115-star 3D projection drops to $r=0.295$ and $\rho=0.281$. The same pattern holds for the 75-star frame. This fidelity result should not be read as a compression win: matched random 115-dimensional projections reach median Pearson $r=0.764$. The question is whether anchor frames measure a reproducible semantic subspace, not whether they beat random projection on raw distance preservation.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Representation & RSA to full & $k$NN@100 \\
+\midrule
+75-signature & 0.560 & 36.4\% \\
+115-signature & 0.577 & 38.9\% \\
+Random 115D projection & 0.764 & -- \\
+75-3D & 0.272 & 9.0\% \\
+115-3D & 0.295 & 9.8\% \\
+\bottomrule
+\end{tabular}
+\caption{Fidelity ladder. Random projections preserve more raw pairwise structure; PSA's claim is reproducible frame structure plus an operational address layer.}
+\label{tab:fidelity}
+\end{table}
+
+Frame robustness is tested by splitting the 115-star catalog into disjoint anchor sets. For two frames $A$ and $B$, with full-space fidelities $r_{AF}$ and $r_{BF}$, the error-independence floor is $r_{AF}r_{BF}$; we report excess agreement $r_{AB}-r_{AF}r_{BF}$. Independent random projections sit on this floor. Random sentence-anchor frames share part of the embedding model's sentence cone. Designed semantic splits exceed both controls.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Frame pair & Pair $r$ & Floor & Excess \\
+\midrule
+Random directions $58{\times}57$ & 0.409 & 0.408 & $+0.001$ \\
+Random sentences $58{\times}57$, all pairs & 0.689 & 0.367 & $+0.318$ \\
+Random sentences $58{\times}57$, non-anchor pairs & 0.776 & 0.402 & $+0.371$ \\
+Semantic tier split $58{\times}57$ & 0.814 & 0.306 & $+0.509$ \\
+Semantic contrast split $59{\times}56$ & 0.861 & 0.310 & $+0.551$ \\
+\bottomrule
+\end{tabular}
+\caption{Frame robustness as excess agreement over the error-independence floor. Random rows are medians over 1,000 trials. The semantic splits add significant agreement beyond both random directions and random sentence anchors.}
+\label{tab:excess}
+\end{table*}
+
+Against 1,000 random-sentence trials on the excess statistic, semantic excess is exceeded with empirical $p=0.001$ for the tier split over all pairs, $p<0.001$ for the contrast split over all pairs, $p=0.006$ for the non-anchor tier control, and $p=0.001$ for the non-anchor contrast control. The result decomposes the field: distributional anisotropy supplies part of the medium, while designed propositional coverage sharpens it into a more reproducible measurement frame.
+
+\subsection{Blocking Recall and Cost}
+
+Pipeline-discovered paraphrase pairs are censored labels if the pipeline used local neighborhoods to discover them. We therefore evaluate blocking by a global full-dimensional sweep: find every sentence pair above a cosine threshold, ignoring PSA addresses, and then ask how many would be retained by a proposed shell.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Target & Frame & Coarse radius & Recall & Pruning \\
+\midrule
+$\cos\geq0.88$ pairs & 75 & 6 & 97.3\% & 82.9\% \\
+$\cos\geq0.88$ pairs & 115 & 6 & 98.0\% & 83.5\% \\
+$\cos\geq0.85$ pairs & 75 & 8 & 97.2\% & 68.8\% \\
+$\cos\geq0.85$ pairs & 115 & 8 & 96.5\% & 69.5\% \\
+$\cos\geq0.85$ pairs & 115 & 9 & 97.8\% & 61.4\% \\
+$\cos\geq0.77$ pairs & 75 & 10 & 95.1\% & 52.3\% \\
+$\cos\geq0.77$ pairs & 115 & 11 & 96.8\% & 44.4\% \\
+Legacy pipeline labels (descriptive) & 75 & 13 & 96.9\% & 27.6\% \\
+Legacy pipeline labels (descriptive) & 115 & 13 & 96.1\% & 28.0\% \\
+\bottomrule
+\end{tabular}
+\caption{Quantile-calibrated blocking knees. The final two rows are censored-label blocking recall, not classifier F1. Held-out retuning over 200 splits confirms radius 6 at $\cos\geq0.88$ (mean recall 0.980, 5th percentile 0.972); the $\cos\geq0.85$ band prefers radius 9.}
+\label{tab:blocking}
+\end{table*}
+
+At the strict near-duplicate operating point ($\cos\geq0.88$), radius 6 retains 98.0\% of globally discovered high-similarity pairs in the 115-star frame while pruning 83.5\% of comparisons. Broader discovery at $\cos\geq0.77$ requires radius 11 and prunes 44.4\%. Direct signature-distance thresholding at matched candidate fraction is complementary rather than dominant: it recovers 100\% at $\cos\geq0.88$, drops to 72.2\% in the paraphrase-relevant $\cos\geq0.85$ band, and recovers 99.1--99.5\% at $\cos\geq0.77$. Tie mass at the matched-cost cutoff is negligible, so the mid-band drop reflects signature geometry. The calibrated grid is retained as the uniform operating layer.
+
+\subsection{Operational Controls}
+
+The original 75-star frame was evaluated under sequential and randomized ingestion. Both preserve 638 \textsc{Precedes} discourse edges exactly and show negative locality slopes under raw Manhattan voxel distance. Because voxel-pair regressions share centroids, regression statistics are descriptive and permutation carries the inference: 1,000 coordinate scrambles give empirical $p<0.001$ in both ingestion orders.
+
+Pipeline-discovered paraphrase labels remain censored diagnostics, not an independent gold standard. A legacy matched-distance analysis and legacy random-anchor occupancy summaries are omitted because their original machine-readable artifacts are absent from the present repository snapshot. The submission retains only claims with an artifact path in the accompanying provenance ledger.
+
+\section{Operational Lessons}
+
+PSA should be used as a blocking surface, not a classifier. Stored addresses are stable within a frame version: recomputing the current graph under the 115-star frame matches 100\% of coarse addresses and 99.8\% of depth-3 micro addresses, while the older 75-star frame reproduces only 17.0\% of those coarse labels on the same embeddings. Frame changes are migrations; relational agreement is more stable than absolute voxel labels.
+
+\section{Conclusion}
+
+PSA turns sentence embeddings into versioned semantic blocking keys. Its signature is not the best raw compressor; it is a reproducible measurement frame whose designed disjoint catalogs share more structure than the controls. Radius-6 routing retains 98.0\% of globally enumerated $\cos\geq0.88$ pairs while pruning 83.5\% of comparisons, but that blocking result does not stand in for application accuracy. A valid deployment persists every sentence, searches free-range and grouped candidates, verifies equivalence independently, and monitors both blocking recall/cost and end-to-end task metrics.
+
+\section{Limitations}
+
+All invariance results are within one embedding model, and the corpus is small and domain-specific. The non-anchor random-sentence null evaluates a slightly reduced pair set (5,473,086 of 5,860,176 pairs); exact subset-matched recomputation remains a camera-ready gate. The corrected sentence-and-group candidate union has contract tests but no fresh end-to-end benchmark, so no application-level accuracy is reported. Cross-model transfer and comparisons with higher-dimensional indexes, signature-space ANN, and learned calibration transforms remain future work.
+
+\bibliography{psa_semantic_field}
+
+\end{document}

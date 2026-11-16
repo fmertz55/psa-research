@@ -1,0 +1,480 @@
+\documentclass[11pt]{article}
+\usepackage[review]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{url}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\title{Anchor-Triangulated Semantic Signatures: Frame-Robust Neighborhood Structure with Tunable Semantic Blocking}
+
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We introduce anchor-triangulated semantic signatures: text representations computed as tier-weighted cosines against a fixed catalog of propositional anchor sentences (``guide stars''). Signatures preserve substantial neighborhood structure under severe dimensional compression ($4{,}096\rightarrow115$): distance structure correlates with the full embedding space (Pearson $r=0.58$, Spearman $\rho=0.62$) and retains 29--39\% of $k$-nearest-neighbor structure for $k=25$--100. Signatures are not a superior compression --- random 115-dimensional projections preserve more raw distance structure (median $r=0.76$) --- they are a consistent measurement frame. Disjoint anchor catalogs agree far above their error-independence floor (pair $r=0.81$--$0.86$; excess $+0.51$--$+0.55$), while independent random projections sit exactly on their floor (excess $\leq0.001$) and disjoint random sentence-anchor frames, which inherit the model's sentence-distribution anisotropy, reproduce only part of the shared structure (median excess $+0.31$--$+0.37$; empirical $p\leq0.006$ on the excess statistic). Anchor signatures therefore triangulate a reproducible semantic subspace: distributional anisotropy contributes a substantial share, and designed propositional coverage adds significant excess agreement beyond it. A calibrated low-dimensional projection supports tunable semantic blocking for idea inventories: at the held-out-validated operating knee, quantile-normalized coarse routing retains 97--98\% of pairs with cosine $\geq0.88$ while pruning approximately 83\% of pairwise comparisons, and holds 95--98\% recall across similarity bands where matched-cost signature thresholding drops to 72\% in the paraphrase-relevant $\cos\geq0.85$ band. These are blocking results, not end-to-end paraphrase accuracy; meaning equivalence remains a downstream judgment.
+\end{abstract}
+
+\section{Introduction}
+
+Embedding models produce powerful text representations, but their native vector spaces are difficult to operate as maintained information systems. A 4,096-dimensional embedding supports cosine comparison, nearest-neighbor search, and downstream reranking, yet it provides no stable semantic address, browsable local surface, or versioned reference frame. Clustering algorithms assign labels; dimensionality reduction produces visual layouts; approximate nearest-neighbor (ANN) systems retrieve candidates. None by itself gives an interpretable, auditable coordinate system whose behavior can be compared across ingestion order, anchor-frame revision, and corpus growth.
+
+The operational motivation for Pixelization of Semantic Anisotropy (PSA) was paraphrase detection during knowledge-graph ingestion. Incoming sentences or propositions must be compared with prior material to decide whether they express an already-known claim, event, or concept. Naive all-pairs comparison is quadratic. The standard record-linkage name for the required reduction is \emph{blocking}: generate a much smaller candidate set, then apply the expensive verifier or reranker only inside that set. PSA is therefore not a replacement for full-dimensional similarity or cross-encoder paraphrase judgment. It is a candidate-generation layer plus an audit surface over the candidate-generation policy.
+
+The intended information model keeps every ingested sentence as a durable sentence node. A verified equivalence may additionally place two or more sentences in a \textsc{ParaphraseGroup}; a sentence with no verified match remains free-range rather than becoming a singleton group. Candidate generation must consequently search nearby free-range sentences, established multi-sentence groups, high-membership local groups, and not-yet-committed items from the current batch. PSA bounds this candidate universe. It does not decide equivalence, create a group from proximity alone, or make unmatched sentences disappear.
+
+This paper recenters PSA around the signature layer. Each text is measured against a fixed catalog of propositional anchors, yielding an anchor-triangulated semantic signature. Voxel grids and low-dimensional projections are indexes over that signature, not the representation itself. This distinction matters empirically: the fidelity ladder below shows that much of the compression loss occurs in the $G\rightarrow3$ projection, while the $4{,}096\rightarrow G$ signature preserves far more of the embedding-space neighborhood structure.
+
+\subsection{Contributions}
+
+This paper makes the following contributions:
+
+\begin{enumerate}
+    \item a guide-star catalog and signature construction method based on tier-weighted cosine measurements against fixed propositional anchors;
+    \item a disjoint-frame triangulation methodology with an excess-over-independence-floor statistic, showing that non-overlapping semantic catalogs share systematic distance structure that independent random projections lack entirely and random sentence-anchor frames reproduce only partially;
+    \item a fidelity ladder using representational similarity analysis (RSA), Mantel-style pairwise distance correlations, and $k$NN overlap across full embeddings, signatures, and three-dimensional PSA projections;
+    \item a calibrated voxelization layer for tunable recall/cost semantic blocking, including an explicit de-censoring evaluation that does not treat pipeline-discovered paraphrase labels as an uncensored gold standard or blocking recall as classifier F1;
+    \item negative controls: random-projection and random-sentence disjoint-frame nulls, coordinate-scramble permutation tests, and a negative end-to-end transfer replay;
+    \item a frame-versioning analysis quantifying the migration cost from 75 to 115 anchors; and
+    \item a reproducibility-oriented evaluation suite for future frame releases.
+\end{enumerate}
+
+\section{Related Work}
+
+\paragraph{Embedding geometry and reference representations.}
+The structure of embedding spaces has been studied extensively. \citet{mikolov2013distributed} showed that word embeddings encode relational structure through linear offsets. Later work probed contextual embeddings for linguistic properties \citep{hewitt2019structural}, anisotropy \citep{ethayarajh2019contextual}, and contextual manifold structure \citep{cai2021isotropy}. PSA differs in emphasis: it constructs a reference-frame measurement system over an embedding model. The semantic differential of \citet{osgood1957measurement} and conceptual spaces \citep{gardenfors2000conceptual} are earlier reference-based accounts of meaning; PSA uses embedded propositional anchors rather than hand-rated adjective scales.
+
+\paragraph{Dimensionality reduction.}
+PCA \citep{pearson1901lines}, t-SNE \citep{vandermaaten2008visualizing}, and UMAP \citep{mcinnes2018umap} produce low-dimensional layouts for analysis and visualization. These layouts are data-dependent. PSA uses a fixed anchor catalog so new sentences can be assigned addresses without refitting the corpus. The Johnson--Lindenstrauss lemma \citep{johnson1984extensions} gives a useful compression baseline, and we measure it: random 115-dimensional projections preserve more raw pairwise structure than anchor signatures (median $r=0.76$ vs.\ $0.58$; Section~\ref{sec:excess}). PSA is therefore not positioned as a compression. Its value is judged by frame reproducibility, address occupancy, and version stability.
+
+\paragraph{ANN, IVF, and semantic blocking.}
+Locality-sensitive hashing \citep{indyk1998approximate}, FAISS \citep{johnson2019billion}, and HNSW \citep{malkov2020hnsw} provide scalable approximate nearest-neighbor retrieval. Structurally, the PSA routing layer resembles inverted-file indexing with a tunable probe radius: a query enters one or more cells, neighboring cells are probed, and full-dimensional reranking follows. PSA does not claim to outperform ANN as a raw retrieval primitive. Its differentiator is that the block identifiers are interpretable, stable within a versioned semantic frame, browsable as graph addresses, and auditable under locality, occupancy, and frame-migration tests. This places PSA alongside blocking methods in record linkage and entity resolution \citep{fellegi1969record,christen2012data}; the novelty is a semantic, versioned blocking key derived from anchor signatures rather than lexical keys or learned hash buckets.
+
+\paragraph{Anchor invariance and representation comparison.}
+Relative representations show that coordinates expressed through relations to anchors can improve cross-system comparability \citep{moschella2023relative}. The platonic representation hypothesis argues that independently trained models may converge toward shared structure \citep{huh2024platonic}. Random indexing and semantic hashing similarly use indirect or compressed codes for semantic retrieval \citep{kanerva2000random,salakhutdinov2009semantic}. Our disjoint-frame experiment contributes an empirical within-model test: two anchor sets with no shared anchors recover similar pairwise distance structure, suggesting that anchor signatures measure relational structure already present in the embedding model. Cross-model invariance remains future work.
+
+\paragraph{Representational similarity analysis.}
+We compare spaces by correlating pairwise distance matrices, following RSA \citep{kriegeskorte2008representational} and Mantel-style matrix comparison \citep{mantel1967detection}. In this paper, RSA is used descriptively to locate where information is lost in the pipeline: full embedding $\rightarrow$ signature $\rightarrow$ three-dimensional address.
+
+\section{Method}
+\label{sec:method}
+
+\subsection{Guide-Star Catalog and Signature}
+\label{sec:guide-stars}
+
+The initial frame contains 75 guide stars organized into seven ontological tiers. Each star is a full sentence, not a keyword, so its embedding contains contextual semantic texture. A later expanded frame adds 40 guide stars across five additional tiers derived from FrameBase-style event and relation coverage \citep{rouces2015framebase}, yielding 115 guide stars total.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}cYccY@{}}
+\toprule
+Tier & Theme & Stars & Weight & Example contrast \\
+\midrule
+0 & Frame anchors & 0--11 & 1.0 & physical object exists $\leftrightarrow$ referenced object absent \\
+1 & Agency and intent & 12--23 & 1.0 & agent performs purposeful action $\leftrightarrow$ agent stops activity \\
+2 & Knowledge and evaluation & 24--35 & 1.0 & person understands topic $\leftrightarrow$ person learns through study \\
+3 & Possession and structure & 36--47 & 1.0 & owner controls resource $\leftrightarrow$ entity lacks required component \\
+4 & Time and sequence & 48--59 & 1.0 & event A precedes event B $\leftrightarrow$ event B follows event A \\
+5 & Quantity and comparison & 60--68 & 1.0 & amount increases $\leftrightarrow$ amount decreases \\
+6 & Modality and constraint & 69--74 & 0.4 & action required $\leftrightarrow$ action forbidden \\
+7--11 & Event and world coverage & 75--114 & 1.0 & perception, motion, social, commerce, physical-world anchors \\
+\bottomrule
+\end{tabularx}
+\caption{Guide-star tiers. Tiers 0--6 define the original 75-star frame; tiers 7--11 define the 40-star expansion.}
+\label{tab:guide-stars}
+\end{table*}
+
+For a text fragment $t$ with embedding $\mathbf{e}(t)\in\mathbb{R}^{4096}$ and guide stars $g_i$, $i\in\{0,\ldots,G-1\}$, the signature is
+
+\begin{equation}
+\sigma(t)=\left[w_{\tau(i)}\cos(\mathbf{e}(t),\mathbf{e}(g_i))\right]_{i=0}^{G-1},
+\end{equation}
+
+where $w_{\tau(i)}$ is the tier weight. Tier 6, modality and constraint, uses $w=0.4$ to reduce a measured modal-attractor collapse in the embedding model. We treat this as a fixed frame hyperparameter.
+
+\subsection{Projection and Voxelization}
+\label{sec:coordinates}
+
+The three-dimensional PSA projection is an index over signatures. The guide-star geometry is defined by $D_{ij}=1-\cos(\mathbf{e}(g_i),\mathbf{e}(g_j))$, and deterministic MDS \citep{kruskal1964mds} maps the anchors to positions $\mathbf{p}_i\in\mathbb{R}^{3}$. The coordinate of text $t$ is a positive-weight barycenter over the anchor positions:
+
+\begin{equation}
+\mathrm{PSA}(t)=
+\frac{\sum_{i=0}^{G-1}\max(\sigma_i(t),0)\mathbf{p}_i}
+     {\sum_{i=0}^{G-1}\max(\sigma_i(t),0)}.
+\end{equation}
+
+The continuous projection is discretized into addresses of the form \texttt{L1\_v\_X\_Y\_Z}. Micro-cells recursively subdivide the $x/y$ extent while retaining coarse $z$, reflecting the implementation's view that fine angular distinctions are better represented in two dimensions. The embedding remains the ground truth; addresses are recomputed from a fixed frame version and serve as an index rather than a storage container.
+
+\subsection{Grid Calibration}
+\label{sec:grid-calibration}
+
+The naive barycentric projection exposed a calibration failure: all-positive cosine weights place the current 3,424-sentence corpus into only eight of the 1,000 nominal coarse cells, and a radius-1 coarse shell covers every pair in the corpus. This produces 100\% apparent recall but zero pruning, so it is not evidence of useful blocking. Calibration is therefore a required part of the index, not an optional visualization step.
+
+We evaluate per-axis empirical quantile normalization: each PSA coordinate axis is rank-normalized to $[0,1]$, then divided into 20 coarse bins. This opens 2,654 occupied coarse cells in the 75-star frame and 2,739 in the 115-star frame. Under radius-1 shells this over-prunes and loses recall, so the calibrated operating parameter is the Chebyshev probe radius. The current knee is coarse radius 6 for the high-precision threshold $\cos\geq0.88$: it preserves 97--98\% recall while pruning approximately 83\% of comparisons (Section~\ref{sec:blocking}). Affine min--max calibration was evaluated as the alternative: it opens only 1{,}143 coarse cells versus 2{,}739 for quantile normalization on the current corpus and requires much larger candidate fractions at matched recall, so quantile calibration is retained.
+
+\subsection{Frame Versioning}
+\label{sec:frame-versioning}
+
+Absolute addresses are stable only within a frame version. Recomputing the current graph under the 115-star catalog reproduces stored addresses exactly at coarse resolution and at 99.8\% for depth-3 micro addresses. Recomputing the same embeddings under the older 75-star frame matches only 17.0\% of stored coarse addresses, confirming that the live graph is a 115-star frame artifact. Migration from 75 to 115 stars is therefore a frame upgrade, not a coordinate-preserving edit. Cross-frame agreement should be evaluated through relational metrics such as distance-matrix correlation, $k$NN overlap, co-membership lift, and blocking recall/cost.
+
+\section{Semantic Locality and Falsification}
+\label{sec:locality}
+
+The original evaluation corpus contains 3,378 segmented sentences from eight AI-related source documents plus an ontology seed. Embeddings are Qwen3 Embedding 8B vectors with 4,096 dimensions \citep{zhang2025qwen3embedding}. Locality is measured by fitting a linear regression of centroid cosine similarity on inter-voxel distance. Because voxel-pair regressions share centroids and therefore contain non-independent pairs, regression $z$ values and slopes are descriptive; permutation carries the inference.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Metric & Run 1 & Run 2 \\
+\midrule
+Ingestion order & sequential & randomized \\
+Occupied voxels & 470 & 445 \\
+Voxel pairs & 110,215 & 98,790 \\
+Decay slope & -0.00236 & -0.00281 \\
+Pearson $r$ & -0.158 & -0.183 \\
+Intercept & 0.7202 & 0.7196 \\
+Empirical permutation $p$ & $<0.001$ & $<0.001$ \\
+Null slope mean & $-2.8{\times}10^{-6}$ & $-1.4{\times}10^{-5}$ \\
+Null slope std. & $2.0{\times}10^{-4}$ & $2.8{\times}10^{-4}$ \\
+\bottomrule
+\end{tabular}
+\caption{Original 75-star locality results under raw Manhattan voxel distance. The p-value is the empirical bound from 1,000 permutations, not a Gaussian extrapolation.}
+\label{tab:original-locality}
+\end{table}
+
+Under a canonical normalized voxel-distance metric, the 75-star baseline gives $r=-0.2875$ and slope $-0.0748$, while the 115-star frame gives $r=-0.3118$ and slope $-0.1148$ (Table~\ref{tab:expanded-baseline}). We treat the larger-magnitude 115-star values as descriptive pending a bootstrap confidence interval over the 75$\rightarrow$115 difference.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Metric & 75-star canonical baseline & 115-star expanded frame \\
+\midrule
+Run date & 2026-05-05 & 2026-05-07 \\
+Assigned sentences & 3,076 eligible & 3,071 \\
+Occupied voxels, $\geq$2 sentences & 49 & 58 \\
+Voxel pairs analyzed & 1,176 & 1,653 \\
+Locality $r$ & -0.2875 & -0.3118 \\
+Decay slope & -0.07482 & -0.11479 \\
+Intercept & 0.8103 & 0.7886 \\
+Empirical permutation $p$ & 0.010 & 0.001 \\
+Null slope mean & 0.001062 & 0.000318 \\
+Null slope std. & 0.02755 & 0.03284 \\
+\bottomrule
+\end{tabular}
+\caption{Canonical normalized-distance comparison between the 75-star baseline and the expanded 115-star frame. The apparent improvement is reported descriptively; a bootstrap CI is required before making a strong comparative claim.}
+\label{tab:expanded-baseline}
+\end{table*}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Metric & 75-star Run 2 & 115-star Run 3 \\
+\midrule
+Observed slope & -0.002807 & -0.118659 \\
+Scrambled mean & -0.000014 & 0.000536 \\
+Scrambled std. & 0.000277 & 0.032100 \\
+Empirical $p$ & $<0.001$ & $<0.001$ \\
+Gaussian $z$ & 10.1 & 3.71 \\
+Voxels & 445 & 59 \\
+Pairs & 98,790 & 1,711 \\
+Permutations & 1,000 & 1,000 \\
+\bottomrule
+\end{tabular}
+\caption{Scramble-control falsification. No permutation in either frame matches the observed negative slope. Gaussian $z$ values are effect-size summaries only.}
+\label{tab:scramble}
+\end{table}
+
+\section{Fidelity Ladder}
+\label{sec:fidelity}
+
+The fidelity ladder compares pairwise distance structure and $k$NN overlap at each compression stage: full embedding, signature space, and three-dimensional PSA projection. Pairwise RSA uses all $5{,}860{,}176$ sentence pairs in the current 3,424-sentence graph.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Comparison & Pearson $r$ & Spearman $\rho$ \\
+\midrule
+Full embedding vs. 75-signature & 0.560 & 0.591 \\
+Full embedding vs. 115-signature & 0.577 & 0.617 \\
+Full embedding vs. random-115 projection & 0.764 & 0.733 \\
+Full embedding vs. 75-3D & 0.272 & 0.254 \\
+Full embedding vs. 115-3D & 0.295 & 0.281 \\
+75-signature vs. 115-signature & 0.947 & 0.939 \\
+75-3D vs. 115-3D & 0.701 & 0.637 \\
+75-signature vs. 75-3D & 0.712 & 0.652 \\
+115-signature vs. 115-3D & 0.712 & 0.656 \\
+\bottomrule
+\end{tabular}
+\caption{RSA/Mantel-style pairwise distance correlations. The largest loss is in the $G\rightarrow3$ projection, not the $4{,}096\rightarrow G$ signature. Random-projection values are medians over 1{,}000 (Pearson) and 25 (Spearman) trials; random projections preserve more raw structure than signatures, motivating the excess-statistic analysis in Section~\ref{sec:excess}.}
+\label{tab:rsa}
+\end{table*}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Representation & $k=10$ & $k=25$ & $k=100$ \\
+\midrule
+75-signature & 24.1\% & 29.0\% & 36.4\% \\
+115-signature & 26.2\% & 31.6\% & 38.9\% \\
+75-3D & 2.7\% & 4.3\% & 9.0\% \\
+115-3D & 2.6\% & 4.7\% & 9.8\% \\
+\bottomrule
+\end{tabular}
+\caption{$k$NN overlap against full embedding neighborhoods. Signature space retains substantially more neighborhood structure than the 3D projection.}
+\label{tab:knn}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Stage & RSA to full & $k$NN@100 \\
+\midrule
+75-signature & 0.560 & 36.4\% \\
+115-signature & 0.577 & 38.9\% \\
+75-3D & 0.272 & 9.0\% \\
+115-3D & 0.295 & 9.8\% \\
+\bottomrule
+\end{tabular}
+\caption{Fidelity ladder summary. The signature layer is the representation; the 3D grid is an index over it.}
+\label{fig:fidelity-ladder}
+\end{figure}
+
+\section{Disjoint-Frame Triangulation}
+\label{sec:disjoint}
+
+To address shared-apparatus criticism, we split the 115-star catalog into non-overlapping anchor frames and compare the distance structures they induce over the same sentence embeddings. In a tier-alternating split, the two signature spaces have Pearson $r=0.814$ and Spearman $\rho=0.790$; in a contrast-halves split they have Pearson $r=0.862$ and Spearman $\rho=0.838$ (Table~\ref{tab:disjoint}). The nested 75-vs-115 signature comparison is higher ($r=0.947$), quantifying shared-anchor inflation at roughly 0.10 correlation. These are within-model results: all signatures are computed over the same embedding model. Cross-model invariance is not claimed here.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Split & Signature $r$ & Signature $\rho$ & 3D $r$ & $k$NN@25 signature \\
+\midrule
+Tier-alternating disjoint frames & 0.814 & 0.790 & 0.565 & 34.3\% \\
+Contrast-halves disjoint frames & 0.862 & 0.838 & 0.697 & 39.0\% \\
+Nested 75 vs. 115 frames & 0.947 & 0.939 & 0.701 & 63.1\% \\
+\bottomrule
+\end{tabular}
+\caption{Disjoint-frame triangulation. Non-overlapping anchor catalogs recover correlated signature distance structures, while nested frames show the expected shared-apparatus inflation.}
+\label{tab:disjoint}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}Ycc@{}}
+\toprule
+Comparison & $r$ & Interpretation \\
+\midrule
+Tier split A vs. B & 0.814 & disjoint anchors recover structure \\
+Contrast split A vs. B & 0.862 & stronger disjoint recovery \\
+Nested 75 vs. 115 & 0.947 & shared anchors inflate agreement \\
+\bottomrule
+\end{tabularx}
+\caption{Disjoint-frame distance comparison. Camera-ready should replace this table with a scatter plot.}
+\label{fig:disjoint-scatter}
+\end{figure}
+
+\subsection{Random-Frame Nulls and the Excess Statistic}
+\label{sec:excess}
+
+Agreement between two disjoint frames is evidence of shared structure only relative to the agreement expected from independent errors. For frames $A$ and $B$ with full-space fidelities $r_{AF}$ and $r_{BF}$, the error-independence floor is $r_{AF}\,r_{BF}$, and we define
+
+\begin{equation}
+\mathrm{excess}(A,B)=r_{AB}-r_{AF}\,r_{BF}.
+\end{equation}
+
+Observed agreement exceeding a frame's own fidelity ($r_{AB}>r_{AF}$) is possible only when the two frames distort the full geometry in a correlated way. The excess statistic also controls for fidelity differences between frame families, which matters below: on raw pair agreement alone, the strongest random-sentence null reaches the tier-split pair value in 15.3\% of trials, while on the excess statistic it essentially never does.
+
+Two null families calibrate the semantic splits over the same $5{,}860{,}176$ pairs (Table~\ref{tab:excess}). Independent random projections at matched dimensionality preserve the most raw structure (median $r=0.76$ at $G=115$) yet sit on their independence floor to within $\pm0.001$ across 1{,}000 trials: their distortions are uncorrelated. Disjoint random sentence-anchor frames, sampled from the evaluated corpus and inheriting the embedding model's sentence-distribution anisotropy \citep{ethayarajh2019contextual}, show substantial shared distortion (median excess $+0.31$ over all pairs, $+0.37$ excluding anchor-involved pairs). The designed semantic splits exceed both families: excess $+0.509$ (tier-alternating) and $+0.551$ (contrast halves). Against 1{,}000 random-sentence trials on the excess statistic, the semantic values are exceeded with empirical $p=0.001$ (tier, all pairs), $p<0.001$ (contrast, all pairs), $p=0.006$ (tier, non-anchor pairs), and $p=0.001$ (contrast, non-anchor pairs); no random-direction trial approaches them ($p<0.001$).
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+Frame pair & Fid.\ $A$ & Fid.\ $B$ & Floor & Pair $r$ & Excess \\
+\midrule
+Random directions $115{\times}115$ & 0.764 & 0.764 & 0.584 & 0.582 & $0.000$ \\
+Random directions $58{\times}57$ & 0.640 & 0.637 & 0.408 & 0.409 & $+0.001$ \\
+Random directions $59{\times}56$ & 0.644 & 0.634 & 0.408 & 0.410 & $+0.001$ \\
+Random sentences $58{\times}57$, all pairs & 0.609 & 0.607 & 0.367 & 0.689 & $+0.318$ \\
+Random sentences $59{\times}56$, all pairs & 0.609 & 0.609 & 0.369 & 0.684 & $+0.314$ \\
+Random sentences $58{\times}57$, non-anchor pairs & 0.634 & 0.634 & 0.402 & 0.776 & $+0.371$ \\
+Random sentences $59{\times}56$, non-anchor pairs & 0.636 & 0.633 & 0.400 & 0.777 & $+0.373$ \\
+Semantic tier-alternating $58{\times}57$ & 0.561 & 0.544 & 0.306 & 0.814 & $+0.509$ \\
+Semantic contrast-halves $59{\times}56$ & 0.568 & 0.545 & 0.310 & 0.861 & $+0.551$ \\
+\bottomrule
+\end{tabular}
+\caption{Excess agreement over the error-independence floor. Random rows are medians over 1{,}000 trials; semantic rows are single measured frame pairs. Random projections preserve the most raw structure but share none of their distortion; random sentence anchors share part of it; designed propositional splits share the most.}
+\label{tab:excess}
+\end{table*}
+
+The decomposition bounds the interpretation. Shared distortion across disjoint anchor frames is not unique to designed catalogs: sentence-distribution anisotropy alone contributes a substantial share, since any real-sentence catalog partially recovers it. Designed propositional coverage adds significant excess agreement beyond both nulls. The signature layer therefore measures a reproducible subspace of the embedding model --- partly distributional, significantly sharpened by catalog design --- rather than constructing arbitrary structure or merely compressing geometry.
+
+\section{Semantic Blocking Evaluation}
+\label{sec:blocking}
+
+Pipeline-discovered paraphrase pairs cannot serve as an uncensored recall denominator if candidate generation used the same voxel neighborhoods being evaluated. A 100\% in-shell result can be tautological: pairs outside the search shell could never have been labeled. We therefore de-censor blocking evaluation by sweeping all full-dimensional sentence pairs above a cosine threshold, globally and without voxel filtering, then asking whether those pairs fall inside the proposed shell.
+
+The raw 3D PSA grid fails as a blocking index at current corpus scale: both the 75-star and 115-star frames occupy only eight coarse cells, and a radius-1 shell covers all $5{,}860{,}176$ pairs. Quantile calibration fixes the occupancy collapse (Figure~\ref{fig:occupancy-calibration}), and radius sweeping exposes the recall/cost knee (Table~\ref{tab:blocking-knees}).
+
+\begin{figure}[t]
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}Yccc@{}}
+\toprule
+Grid & Cells & Radius & Cand. frac. \\
+\midrule
+75 raw coarse & 8 & 1 & 100.0\% \\
+115 raw coarse & 8 & 1 & 100.0\% \\
+75 quantile coarse & 2,654 & 1 & 0.345\% \\
+115 quantile coarse & 2,739 & 1 & 0.327\% \\
+75 quantile coarse & 2,654 & 6 & 17.08\% \\
+115 quantile coarse & 2,739 & 6 & 16.50\% \\
+\bottomrule
+\end{tabularx}
+\caption{Occupancy before and after grid calibration. Quantile calibration opens the address space; radius controls recall/cost.}
+\label{fig:occupancy-calibration}
+\end{figure}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Target & Frame & Coarse radius & Recall & Pruning \\
+\midrule
+$\cos\geq0.88$ high-sim pairs & 75 & 6 & 97.3\% & 82.9\% \\
+$\cos\geq0.88$ high-sim pairs & 115 & 6 & 98.0\% & 83.5\% \\
+$\cos\geq0.85$ high-sim pairs & 75 & 8 & 97.2\% & 68.8\% \\
+$\cos\geq0.85$ high-sim pairs & 115 & 8 & 96.5\% & 69.5\% \\
+$\cos\geq0.77$ high-sim pairs & 75 & 10 & 95.1\% & 52.3\% \\
+$\cos\geq0.77$ high-sim pairs & 115 & 11 & 96.8\% & 44.4\% \\
+Legacy pipeline labels (descriptive) & 75 & 13 & 96.9\% & 27.6\% \\
+Legacy pipeline labels (descriptive) & 115 & 13 & 96.1\% & 28.0\% \\
+\bottomrule
+\end{tabular}
+\caption{Quantile-calibrated coarse blocking knees. The final two rows are blocking recall over pipeline-discovered labels, not paraphrase-classification F1, and are descriptive because their label-discovery process was locally censored. Held-out retuning over 200 splits confirms radius 6 at $\cos\geq0.88$ (mean test recall 0.980, 5th percentile 0.972); the $\cos\geq0.85$ band prefers radius 9 and $\cos\geq0.77$ prefers radius 11--12.}
+\label{tab:blocking-knees}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\small
+\begin{tabular}{@{}cccc@{}}
+\toprule
+115 radius & Cand. frac. & Recall @0.88 & Recall @0.77 \\
+\midrule
+5 & 10.94\% & 91.1\% & 49.1\% \\
+6 & 16.50\% & 98.0\% & 57.2\% \\
+8 & 30.52\% & 99.4\% & 85.9\% \\
+10 & 47.00\% & 99.7\% & 94.6\% \\
+11 & 55.60\% & 99.7\% & 96.8\% \\
+13 & 72.00\% & 99.9\% & 99.1\% \\
+\bottomrule
+\end{tabular}
+\caption{Recall/cost curve for quantile-normalized 115-star coarse routing. Higher thresholds support aggressive pruning; lower thresholds require wider probes.}
+\label{fig:recall-cost}
+\end{figure}
+
+The threshold gradient is operationally important. At $\cos\geq0.88$, radius 6 recovers 98.0\% of high-similarity pairs while pruning 83.5\% of comparisons. At $\cos\geq0.77$, reaching comparable recall requires radius 11 and prunes only 44.4\%. This is the dedupe-vs-discovery tradeoff: strict near-duplicate routing is cheap; broad semantic discovery requires wider candidate probes.
+
+The matched-cost signature baseline is now measured. At equal candidate fraction, direct signature-distance thresholding is band-sensitive: it recovers 100\% of $\cos\geq0.88$ pairs, drops to 72.2\% in the $\cos\geq0.85$ band, and recovers 99.1--99.5\% at $\cos\geq0.77$, while quantile-calibrated routing holds 95--98\% across all three bands. Tie mass at the matched-cost cutoff is negligible, so the mid-band drop reflects signature geometry rather than a thresholding artifact. The band where signature thresholding fails is precisely the paraphrase-relevant band, so the calibrated grid is retained as the uniform operating layer; signature thresholding is competitive only at the strict near-duplicate and broad-discovery extremes.
+
+\section{Proximity, Not Equivalence}
+\label{sec:negative-paraphrase}
+
+Pipeline-discovered paraphrase labels are useful for system diagnostics, but a local-neighborhood discovery process cannot independently establish global paraphrase recall. A previous matched-distance analysis also lacks its original machine-readable artifact in the present repository snapshot, so its numerical results are quarantined from this revision rather than repeated from a manuscript transcript. The retained claim is architectural and testable: an address is a candidate key, and only an independent verifier or task policy may establish equivalence.
+
+\section{Order Invariance}
+\label{sec:order-invariance}
+
+Order invariance is evaluated by ingesting the same corpus twice: once sequentially by document size and once under randomized ordering. Within the 75-star frame, both runs preserve 638 \textsc{precedes} edges exactly: one intra-voxel edge and 637 cross-voxel edges in both runs. The standard-candle voxel \texttt{L1\_v\_10\_9\_11} contains nine sentences in both runs, and embedding coverage is 100\% in both runs.
+
+The locality slope changes from $-0.00236$ to $-0.00281$, while Pearson $r$ changes from $-0.158$ to $-0.183$. These changes are reported as order-packing effects, not as a claim that randomization improves the representation; no directional improvement claim is made without a bootstrap interval over the order effect.
+
+\section{Discussion}
+
+\paragraph{Gauge and invariant content.}
+The frame-versioning result separates coordinate gauge from relational content. Absolute voxel identifiers are gauge-dependent: the 75-star and 115-star frames assign different addresses. The more stable content is relational: signature-space distance matrices remain highly correlated across nested frames ($r=0.947$) and disjoint frames ($r=0.81$--$0.86$), with excess agreement far above both random-direction and random-sentence nulls (Section~\ref{sec:excess}).
+
+\paragraph{The 3D bottleneck.}
+The fidelity ladder demotes the 3D grid. It is useful as a blocking and browsing surface, especially after calibration, but it is not the primary representation. Signature space preserves more of the full embedding neighborhood structure; the 3D projection is a tunable operational index over that structure.
+
+\paragraph{Scaling prediction.}
+The observed address concentration predicts an engineering bottleneck: hot semantic regions will grow faster than sparse regions as corpus size increases. A practical PSA system therefore needs density-adaptive subdivision inside hot blocks and explicit monitoring of candidate-set growth. High-membership paraphrase groups may be useful routing landmarks, but group membership itself still requires independent verification.
+
+\section{Limitations}
+
+All invariance claims here are within a single embedding model. Disjoint anchors recover similar structure inside that model; cross-model invariance is future work. The evaluated corpus is also small and domain-specific, so radius choices and occupancy behavior should not be treated as universal constants.
+
+The blocking knee has been retuned on held-out splits (200 trials): the $\cos\geq0.88$ operating point is stable at radius 6 (mean test recall 0.980, 5th percentile 0.972), while looser thresholds shift by one radius step. At the strictest global threshold, $n=711$ high-similarity pairs at $\cos\geq0.88$ gives binomial-scale uncertainty around one percentage point, before accounting for dependence among pairs. In the excess-statistic analysis, the non-anchor random-sentence nulls evaluate a slightly reduced pair set ($5{,}473{,}086$ of $5{,}860{,}176$ pairs); the semantic reference values should be recomputed on each null's exact pair subset before camera-ready.
+
+The corrected sentence-and-group candidate union has unit-level contract coverage but has not yet received a fresh end-to-end task benchmark. No application-level accuracy is reported until that current implementation is evaluated.
+
+The three-dimensional projection bottleneck is quantified rather than hidden. This paper argues that the signature is the representation and the grid is an index. Future work should compare higher-dimensional indexes, signature-space ANN, learned calibration transforms, and cross-model anchor transfer.
+
+\section{Conclusion}
+
+Anchor-triangulated semantic signatures provide a compact, frame-robust measurement layer over sentence embeddings. The signatures preserve substantial pairwise and nearest-neighbor structure, recover correlated distance geometry even under disjoint anchor frames, and support calibrated blocking after projection. The calibrated grid is useful, but only when recall is reported with cost and only after correcting for censored labels. The strongest current claim is therefore narrow and measurable: within one embedding model, propositional anchor signatures expose relational structure that survives frame changes, while calibrated PSA addresses provide a tunable, auditable candidate-generation surface for near-duplicate semantic maintenance.
+
+\section*{Acknowledgments}
+
+Generative AI tools, including ChatGPT/Codex, were used to assist with language polishing, structural critique, drafting, and revision of portions of this manuscript. The authors reviewed and are responsible for all content, experiments, numerical results, citations, and claims in the submission. Generative AI tools are not listed as authors.
+
+\bibliography{psa_semantic_field}
+
+\clearpage
+\onecolumn
+\appendix
+
+\section{Reproducibility Checklist}
+
+\begin{table}[!ht]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}lY@{}}
+\toprule
+Requirement & Status \\
+\midrule
+Code availability & Will be released. \\
+Data availability & Will be released with source-document and sentence-level metadata where licensing permits. \\
+Deterministic seeds & MDS uses \texttt{random\_state=42}; scramble controls use seed 42. \\
+Embedding model & Qwen3 Embedding 8B, 4,096 dimensions. \\
+Core hyperparameters & Grid size 0.10 for raw PSA; quantile coarse grid uses 20 bins per axis; modality tier weight 0.4; 1,000 scramble permutations; 1,000 random-projection and 1,000 random-sentence frame-pair trials per configuration. \\
+Sweep artifacts & Exact filenames, JSON selectors, and the separation between the completed random-projection and random-sentence runs are recorded in the accompanying claim-provenance ledger. The later ``latest'' alias skips random projection. \\
+End-to-end evaluation & Pending on the current sentence-and-group candidate route; no application-level score is reported. \\
+Label provenance & Paraphrase labels are pipeline-discovered and therefore censored for recall evaluation; global full-dimensional threshold sweeps are used for de-censoring. \\
+Gating runs & Bootstrap CIs for 75$\rightarrow$115 and order-invariance comparisons; semantic reference recomputation on exact non-anchor pair subsets; corrected-route end-to-end replay; disjoint-frame scatter plot. \\
+\bottomrule
+\end{tabularx}
+\caption{Reproducibility checklist for the submitted PSA experiments.}
+\label{tab:checklist}
+\end{table}
+
+\end{document}

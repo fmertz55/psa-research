@@ -1,0 +1,81 @@
+{
+  "manifest_id": "aiidea-wikipedia-100k-2026-08-26-v1",
+  "max_article_sentences": 1000,
+  "target_min_accepted_sentences": 100000,
+  "target_max_accepted_sentences": 105000,
+  "topic_bands": [
+    {
+      "id": "broad_knowledge",
+      "target_accepted_sentences": 25000,
+      "max_candidates": 1000,
+      "max_category_depth": 1,
+      "categories": [
+        "Category:Knowledge",
+        "Category:Management",
+        "Category:Education",
+        "Category:Economics",
+        "Category:Law",
+        "Category:Philosophy of science"
+      ]
+    },
+    {
+      "id": "people_organizations",
+      "target_accepted_sentences": 20000,
+      "max_candidates": 1500,
+      "max_category_depth": 1,
+      "categories": [
+        "Category:Artificial intelligence researchers",
+        "Category:Computer scientists",
+        "Category:Technology companies",
+        "Category:Research institutes",
+        "Category:Standards organizations"
+      ]
+    },
+    {
+      "id": "science_technology",
+      "target_accepted_sentences": 25000,
+      "max_candidates": 1000,
+      "max_category_depth": 1,
+      "categories": [
+        "Category:Artificial intelligence",
+        "Category:Machine learning",
+        "Category:Natural language processing",
+        "Category:Computer vision",
+        "Category:Robotics",
+        "Category:Data science",
+        "Category:Software engineering",
+        "Category:Cloud computing",
+        "Category:Computer security"
+      ]
+    },
+    {
+      "id": "history_culture",
+      "target_accepted_sentences": 15000,
+      "max_candidates": 800,
+      "max_category_depth": 2,
+      "categories": [
+        "Category:History of computing",
+        "Category:History of artificial intelligence",
+        "Category:Internet culture",
+        "Category:Digital media",
+        "Category:Science and technology studies"
+      ]
+    },
+    {
+      "id": "places_events",
+      "target_accepted_sentences": 15000,
+      "max_candidates": 1200,
+      "max_category_depth": 2,
+      "categories": [
+        "Category:Technology by country",
+        "Category:Information technology by country",
+        "Category:Science and technology by country",
+        "Category:Technology conferences",
+        "Category:Technology events",
+        "Category:Internet events",
+        "Category:Smart cities",
+        "Category:Applications of artificial intelligence"
+      ]
+    }
+  ]
+}

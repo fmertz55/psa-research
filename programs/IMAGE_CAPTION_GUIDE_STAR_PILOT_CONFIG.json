@@ -1,0 +1,85 @@
+{
+  "schema_version": "aiidea_image_caption_neighborhood_config_v1",
+  "dataset": {
+    "name": "intro/flickr8k",
+    "revision": "c7a02cb487da0eca729e133194b0f842cb578c08",
+    "config": "default",
+    "guide_split": "train",
+    "evaluation_split": "test",
+    "guide_count": 115,
+    "evaluation_count": 200,
+    "seed": 20260817,
+    "selection_method": "seeded_contiguous_window_v1",
+    "materialized_selection": {
+      "guide_record_id_pattern": "intro/flickr8k:default:train:{row_index}",
+      "guide_row_indexes_inclusive": [2713, 2827],
+      "evaluation_record_id_pattern": "intro/flickr8k:default:test:{row_index}",
+      "evaluation_row_indexes_inclusive": [552, 751],
+      "full_record_id_manifest": "temp/image_caption_neighborhood/data/manifest.json"
+    }
+  },
+  "models": {
+    "text": {
+      "model_id": "Qwen/Qwen3-Embedding-8B",
+      "revision": "1d8ad4ca9b3dd8059ad90a75d4983776a23d44af",
+      "provider": "hf-endpoint",
+      "api_style": "hf-feature-extraction",
+      "endpoint_url_environment_variable": "HF_QWEN3_TEXT_EMBEDDING_ENDPOINT",
+      "managed_hardware": {
+        "source": "hugging-face-inference-catalog",
+        "accelerator": "gpu",
+        "expected_instance_type": "nvidia-l4",
+        "expected_instance_size": "x1",
+        "max_replica": 1,
+        "scale_to_zero_timeout_minutes": 15,
+        "pause_after_workflow": true
+      }
+    },
+    "image": {
+      "model_id": "Qwen/Qwen3-VL-Embedding-8B",
+      "revision": "2c4565515e0f265c6511776e7193b22c0968ddc7",
+      "provider": "hf-endpoint",
+      "api_style": "hf-multimodal",
+      "endpoint_url_environment_variable": "HF_QWEN3_VL_EMBEDDING_ENDPOINT",
+      "hosted_adapter": "deploy/huggingface/qwen3_vl_embedding",
+      "managed_hardware": {
+        "vendor": "aws",
+        "region": "us-east-1",
+        "instance_type": "nvidia-l4",
+        "instance_size": "x1",
+        "max_replica": 1,
+        "scale_to_zero_timeout_minutes": 15,
+        "pause_after_workflow": true
+      }
+    },
+    "credential_environment_variable": "HF_TOKEN"
+  },
+  "experiment": {
+    "top_k": [4, 8, 16, 32],
+    "random_guide_subset": 64,
+    "bootstrap_samples": 2000,
+    "controls": [
+      "shuffled_evaluation_captions",
+      "lexical_hard_negatives",
+      "shuffled_guide_star_identities",
+      "random_guide_star_subset"
+    ],
+    "cross_model_native_vector_comparison": false,
+    "writes_graph_membership": false
+  },
+  "commands": [
+    ".venv/bin/python scripts/research/psa/run_image_caption_neighborhood_experiment.py prepare",
+    ".venv/bin/python scripts/research/psa/run_image_caption_neighborhood_experiment.py preflight",
+    ".venv/bin/python scripts/research/psa/run_image_caption_neighborhood_experiment.py run"
+  ],
+  "github_actions": {
+    "workflow": ".github/workflows/qwen-image-caption-neighborhood.yml",
+    "trigger": "workflow_dispatch",
+    "credential_secret": "HF_TOKEN",
+    "multimodal_endpoint": "optional workflow input; otherwise provisioned temporarily",
+    "resumable_multimodal_endpoint": "optional paused pilot endpoint name; resumed and paused by the workflow",
+    "provisions_compute": true,
+    "provisioned_compute": "one catalog nvidia-l4 x1 text endpoint plus one private AWS nvidia-l4 x1 image endpoint",
+    "cleanup": "unconditional pause steps for both temporary endpoints"
+  }
+}
